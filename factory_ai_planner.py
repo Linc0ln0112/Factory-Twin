@@ -59,7 +59,7 @@ if "playing" not in st.session_state: st.session_state.playing = False
 # 3. UI HEADER & DATA SYNC
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Tesla Digital Twin")
-st.title("⚡ Factory Planner: Persistent Timeline")
+st.title("⚡ Factory Planner")
 
 # Force read latest data from disk on every script run
 data = load_data()
