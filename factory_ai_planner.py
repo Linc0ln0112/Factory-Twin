@@ -8,14 +8,18 @@ from datetime import date, timedelta
 import time
 
 # ------------------------------------------------
-# 1. CONFIG
+# 1. CONFIG & REFINED COLORS
 # ------------------------------------------------
 GRID_X, GRID_Y, CELL = 60, 30, 20
 DATA_FILE = "factory_grid.json"
 
 OCCUPIED_TYPES = {
-    "Traffic": "#FFFF00", "Storage": "#0047AB", "Production": "#1e90ff",
-    "Buffer": "#87CEEB", "Utilities": "#FFA500", "Safety": "#FF8C00"
+    "Traffic": "#FFFF00", 
+    "Storage": "#0047AB", 
+    "Production": "#1e90ff",
+    "Buffer": "#87CEEB", 
+    "Utilities": "#FFA500", 
+    "Safety": "#FF8C00"
 }
 STATUSES = {"Free": "#d3d3d3", "Blocked": "#444444", **OCCUPIED_TYPES}
 SELECTION_COLOR = "#00FF00" 
@@ -27,15 +31,20 @@ def get_grid_coordinates():
                          for x in range(GRID_X) for y in range(GRID_Y)])
 
 def load_data():
+    """Busts cache to ensure we always have the latest file state."""
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, "r") as f: return json.load(f)
-        except: return {}
+            with open(DATA_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
     return {}
 
 def save_data(data_dict):
-    with open(DATA_FILE, "w") as f: json.dump(data_dict, f, indent=2)
+    with open(DATA_FILE, "w") as f:
+        json.dump(data_dict, f, indent=2)
 
+# Initialize Core Data
 bays_df = get_grid_coordinates()
 STRUCTURAL_IDS = {f"B{x}_{y}" for x in range(GRID_X) for y in range(GRID_Y) if x % 5 == 0 and y % 5 == 0}
 
@@ -47,11 +56,12 @@ if "view_date" not in st.session_state: st.session_state.view_date = date.today(
 if "playing" not in st.session_state: st.session_state.playing = False
 
 # ------------------------------------------------
-# 3. UI HEADER
+# 3. UI HEADER & DATA SYNC
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Tesla Digital Twin")
-st.title("⚡ Factory Planner: Persistent Status")
+st.title("⚡ Factory Planner: Persistent Timeline")
 
+# Force read latest data from disk on every script run
 data = load_data()
 
 t_col1, t_col2 = st.columns([1, 10])
@@ -63,41 +73,50 @@ with t_col1:
 
 with t_col2:
     st.session_state.view_date = st.slider(
-        "🗓️ Factory Evolution", 
+        "🗓️ Factory Evolution (Drag to see future state)", 
         min_value=date.today() - timedelta(days=30), 
         max_value=date.today() + timedelta(days=365), 
         value=st.session_state.view_date, format="MMM DD, YYYY"
     )
 
-left, right = st.columns([1, 6])
+# ------------------------------------------------
+# 4. MAIN LAYOUT: SIDEBAR & GRID
+# ------------------------------------------------
+left, right = st.columns([1, 5.5])
 
-# ------------------------------------------------
-# 4. SIDEBAR: PROPOSALS
-# ------------------------------------------------
 with left:
     st.subheader("📝 New Proposal")
     p_type = st.selectbox("Proposed Category", list(OCCUPIED_TYPES.keys()) + ["Free"])
-    p_start = st.date_input("Start Date", value=st.session_state.view_date)
-    p_reason = st.text_input("Project Name/ID", placeholder="e.g., Robot Install")
+    p_start = st.date_input("Change Start Date", value=st.session_state.view_date)
+    p_reason = st.text_input("Project Name/ID", placeholder="e.g., Line 3 Expansion")
     
-    st.caption("Note: Approved changes persist from Start Date forward.")
+    st.caption("Approved changes persist indefinitely from start date.")
     
     if st.button("Submit Proposal", type="primary", use_container_width=True):
         if st.session_state.selected_bays:
+            # We modify 'data' which was loaded at the top
             for b_id in st.session_state.selected_bays:
                 if b_id in STRUCTURAL_IDS: continue
                 if b_id not in data: data[b_id] = {"history": [], "proposals": []}
                 data[b_id].setdefault("proposals", []).append({
-                    "id": f"P-{int(time.time())}", "type": p_type,
-                    "start": p_start.isoformat(), "reason": p_reason
+                    "id": f"P-{int(time.time())}", 
+                    "type": p_type,
+                    "start": p_start.isoformat(), 
+                    "reason": p_reason
                 })
-            save_data(data); st.session_state.selected_bays = set(); st.rerun()
+            save_data(data)
+            st.session_state.selected_bays = set()
+            st.rerun()
 
     if st.button("Clear Selection", use_container_width=True):
-        st.session_state.selected_bays = set(); st.rerun()
+        st.session_state.selected_bays = set()
+        st.rerun()
+    
+    if st.session_state.selected_bays:
+        st.success(f"Bays Selected: {len(st.session_state.selected_bays)}")
 
 # ------------------------------------------------
-# 5. RENDER ENGINE (Most Recent State Logic)
+# 5. RENDER ENGINE (Layout Optimized)
 # ------------------------------------------------
 def create_map():
     v_date = st.session_state.view_date
@@ -106,26 +125,24 @@ def create_map():
     for b_id in bays_df['bay']:
         is_selected = b_id in st.session_state.selected_bays
         info = data.get(b_id)
-        base_col, label, b_col, b_wid, reason_str = STATUSES["Free"], "Free", "#111", 1, ""
+        
+        # Default State
+        base_col, label, b_col, b_wid, reason_str = STATUSES["Free"], "Free Space", "#111", 1, ""
         
         if b_id in STRUCTURAL_IDS:
-            base_col, label = STATUSES["Blocked"], "Column"
+            base_col, label = STATUSES["Blocked"], "Structural Column"
         elif info:
-            # FIND MOST RECENT APPROVED STATE
-            # Sort history by date descending to find the latest applicable change
+            # PERSISTENT HISTORY LOGIC: Find the latest change on or before current date
             valid_history = [h for h in info.get("history", []) if date.fromisoformat(h["start"]) <= v_date]
             if valid_history:
-                # Get the one with the latest start date
                 latest_event = max(valid_history, key=lambda x: x["start"])
                 label = latest_event["type"]
                 base_col = STATUSES.get(label, "#d3d3d3")
-                reason_str = f"<br>Status: {label}<br>Since: {latest_event['start']}"
+                reason_str = f"<br>Current Use: {label}<br>Project: {latest_event.get('reason', 'N/A')}"
 
-            # OVERLAY PENDING PROPOSALS
+            # PENDING PROPOSALS: Overlay red border if proposal is active on this date
             for p in info.get("proposals", []):
-                ps_d = date.fromisoformat(p["start"])
-                # Proposal only shows if we are on or after its start date
-                if ps_d <= v_date:
+                if date.fromisoformat(p["start"]) <= v_date:
                     b_col, b_wid = PENDING_OUTLINE, 3
                     label = f"{label} → {p['type']} (PENDING)"
                     reason_str += f"<br><b>PROPOSED:</b> {p['reason']}"
@@ -137,12 +154,13 @@ def create_map():
 
     fig = go.Figure(go.Scattergl(
         x=bays_df['x'], y=bays_df['y'], mode="markers",
-        marker=dict(symbol="square", size=22, color=colors, line=dict(width=l_widths, color=l_colors)),
+        marker=dict(symbol="square", size=20, color=colors, line=dict(width=l_widths, color=l_colors)),
         text=texts, hoverinfo="text"
     ))
     
     fig.update_layout(
-        template="plotly_dark", height=850, margin=dict(l=5, r=5, t=5, b=5),
+        template="plotly_dark", height=850, 
+        margin=dict(l=10, r=10, t=10, b=10),
         xaxis=dict(visible=False, fixedrange=True),
         yaxis=dict(visible=False, fixedrange=True, autorange="reversed"),
         uirevision="constant", dragmode='select', clickmode='event+select'
@@ -150,46 +168,71 @@ def create_map():
     return fig
 
 with right:
+    # Use streamlit-plotly-events2 for interactive selection
     ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=850)
+    
     if ev and not st.session_state.playing:
         new_ids = {bays_df.iloc[p['pointNumber']]['bay'] for p in ev if 'pointNumber' in p}
-        st.session_state.selected_bays ^= new_ids; st.rerun()
+        st.session_state.selected_bays ^= new_ids
+        st.rerun()
     
-    # LEGEND
+    # --- COMPACT HORIZONTAL LEGEND ---
     st.write("###")
-    cols = st.columns(len(STATUSES) + 1)
-    for i, (l, c) in enumerate(list(STATUSES.items()) + [("Selected", SELECTION_COLOR)]):
-        cols[i].markdown(f"<div style='border-bottom: 5px solid {c}; text-align: center;'><small><b>{l.upper()}</b></small></div>", unsafe_allow_html=True)
+    l_items = list(STATUSES.items()) + [("Selected", SELECTION_COLOR)]
+    cols = st.columns(len(l_items))
+    for i, (name, color) in enumerate(l_items):
+        cols[i].markdown(
+            f"<div style='border-bottom: 5px solid {color}; text-align: center; padding-bottom: 5px;'>"
+            f"<small style='font-weight: bold; color: white;'>{name.upper()}</small></div>", 
+            unsafe_allow_html=True
+        )
+    st.markdown(f"<div style='text-align: center; color: {PENDING_OUTLINE}; font-size: 13px; margin-top: 15px;'>◆ RED BORDER INDICATES PENDING PROPOSAL STARTING ON OR BEFORE SELECTED DATE</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------
-# 6. PROPOSAL MANAGEMENT
+# 6. PROPOSAL MANAGEMENT (Instant Approval)
 # ------------------------------------------------
 st.divider()
 st.subheader("📋 Requests In Review")
 all_proposals = []
 for b_id, info in data.items():
     for p in info.get("proposals", []):
-        all_proposals.append({"Bay": b_id, "Type": p["type"], "Start": p["start"], "Project": p["reason"]})
+        all_proposals.append({
+            "Bay": b_id, "Type": p["type"], "Start": p["start"], "Project": p["reason"]
+        })
 
 if all_proposals:
     prop_df = pd.DataFrame(all_proposals)
     for project, group in prop_df.groupby("Project"):
-        with st.expander(f"Project: {project} ({len(group)} Bays)"):
+        with st.expander(f"PROJECT: {project} ({len(group)} Bays Requested)"):
             st.table(group[["Bay", "Type", "Start"]])
-            if st.button(f"✅ Approve {project}", key=f"app_{project}"):
+            c1, c2 = st.columns([1, 4])
+            
+            if c1.button(f"✅ Approve {project}", key=f"app_{project}", type="primary"):
+                # Load fresh to ensure no data loss
+                latest_data = load_data()
                 for b_id in group["Bay"]:
-                    # Create entry: Type and Start date (No End date required now)
-                    new_entry = {"type": group.iloc[0]["Type"], "start": str(group.iloc[0]["Start"]), "reason": project}
-                    data[b_id].setdefault("history", []).append(new_entry)
-                    data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
-                save_data(data); st.rerun()
+                    latest_data.setdefault(b_id, {"history": [], "proposals": []})
+                    # Add to history
+                    latest_data[b_id].setdefault("history", []).append({
+                        "type": group.iloc[0]["Type"],
+                        "start": str(group.iloc[0]["Start"]),
+                        "reason": project
+                    })
+                    # Remove from proposals
+                    latest_data[b_id]["proposals"] = [p for p in latest_data[b_id].get("proposals", []) if p["reason"] != project]
+                
+                save_data(latest_data)
+                st.session_state.selected_bays = set()
+                st.rerun()
 else:
-    st.info("No pending proposals.")
+    st.info("No proposals pending approval.")
 
 # ------------------------------------------------
 # 7. ANIMATION
 # ------------------------------------------------
 if st.session_state.playing:
-    time.sleep(0.05); st.session_state.view_date += timedelta(days=1)
-    if st.session_state.view_date >= date.today() + timedelta(days=365): st.session_state.view_date = date.today()
+    time.sleep(0.05)
+    st.session_state.view_date += timedelta(days=1)
+    if st.session_state.view_date >= date.today() + timedelta(days=365): 
+        st.session_state.view_date = date.today()
     st.rerun()
