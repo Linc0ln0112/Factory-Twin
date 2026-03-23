@@ -50,7 +50,7 @@ if "playing" not in st.session_state: st.session_state.playing = False
 # 3. UI HEADER
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Tesla Digital Twin")
-st.title("⚡ Factory Planner")
+st.title("⚡ Factory Planner: Persistent Status")
 
 data = load_data()
 
@@ -64,31 +64,32 @@ with t_col1:
 with t_col2:
     st.session_state.view_date = st.slider(
         "🗓️ Factory Evolution", 
-        min_value=date.today(), max_value=date.today() + timedelta(days=365), 
+        min_value=date.today() - timedelta(days=30), 
+        max_value=date.today() + timedelta(days=365), 
         value=st.session_state.view_date, format="MMM DD, YYYY"
     )
 
-# ------------------------------------------------
-# 4. MAIN LAYOUT
-# ------------------------------------------------
-left, right = st.columns([1, 6]) # Adjusted to give even more room to the grid
+left, right = st.columns([1, 6])
 
+# ------------------------------------------------
+# 4. SIDEBAR: PROPOSALS
+# ------------------------------------------------
 with left:
     st.subheader("📝 New Proposal")
     p_type = st.selectbox("Proposed Category", list(OCCUPIED_TYPES.keys()) + ["Free"])
     p_start = st.date_input("Start Date", value=st.session_state.view_date)
-    p_end = st.date_input("End Date", value=p_start + timedelta(days=14))
     p_reason = st.text_input("Project Name/ID", placeholder="e.g., Robot Install")
+    
+    st.caption("Note: Approved changes persist from Start Date forward.")
     
     if st.button("Submit Proposal", type="primary", use_container_width=True):
         if st.session_state.selected_bays:
             for b_id in st.session_state.selected_bays:
                 if b_id in STRUCTURAL_IDS: continue
                 if b_id not in data: data[b_id] = {"history": [], "proposals": []}
-                if "proposals" not in data[b_id]: data[b_id]["proposals"] = []
-                data[b_id]["proposals"].append({
+                data[b_id].setdefault("proposals", []).append({
                     "id": f"P-{int(time.time())}", "type": p_type,
-                    "start": p_start.isoformat(), "end": p_end.isoformat(), "reason": p_reason
+                    "start": p_start.isoformat(), "reason": p_reason
                 })
             save_data(data); st.session_state.selected_bays = set(); st.rerun()
 
@@ -96,7 +97,7 @@ with left:
         st.session_state.selected_bays = set(); st.rerun()
 
 # ------------------------------------------------
-# 5. RENDER ENGINE (Layout Optimized)
+# 5. RENDER ENGINE (Most Recent State Logic)
 # ------------------------------------------------
 def create_map():
     v_date = st.session_state.view_date
@@ -110,24 +111,21 @@ def create_map():
         if b_id in STRUCTURAL_IDS:
             base_col, label = STATUSES["Blocked"], "Column"
         elif info:
-            # Check APPROVED History first
-            active_event = None
-            for event in info.get("history", []):
-                h_s = date.fromisoformat(event["start"])
-                h_e = date.fromisoformat(event["end"])
-                if h_s <= v_date <= h_e:
-                    active_event = event
-                    break
-            
-            if active_event:
-                label = active_event["type"]
+            # FIND MOST RECENT APPROVED STATE
+            # Sort history by date descending to find the latest applicable change
+            valid_history = [h for h in info.get("history", []) if date.fromisoformat(h["start"]) <= v_date]
+            if valid_history:
+                # Get the one with the latest start date
+                latest_event = max(valid_history, key=lambda x: x["start"])
+                label = latest_event["type"]
                 base_col = STATUSES.get(label, "#d3d3d3")
-                reason_str = f"<br>Status: {label}<br>Project: {active_event.get('reason', 'N/A')}"
+                reason_str = f"<br>Status: {label}<br>Since: {latest_event['start']}"
 
-            # Check PROPOSALS second (Red Overlays)
+            # OVERLAY PENDING PROPOSALS
             for p in info.get("proposals", []):
-                ps_d, pe_d = date.fromisoformat(p["start"]), date.fromisoformat(p["end"])
-                if ps_d <= v_date <= pe_d:
+                ps_d = date.fromisoformat(p["start"])
+                # Proposal only shows if we are on or after its start date
+                if ps_d <= v_date:
                     b_col, b_wid = PENDING_OUTLINE, 3
                     label = f"{label} → {p['type']} (PENDING)"
                     reason_str += f"<br><b>PROPOSED:</b> {p['reason']}"
@@ -139,13 +137,12 @@ def create_map():
 
     fig = go.Figure(go.Scattergl(
         x=bays_df['x'], y=bays_df['y'], mode="markers",
-        marker=dict(symbol="square", size=20, color=colors, line=dict(width=l_widths, color=l_colors)),
+        marker=dict(symbol="square", size=22, color=colors, line=dict(width=l_widths, color=l_colors)),
         text=texts, hoverinfo="text"
     ))
     
     fig.update_layout(
-        template="plotly_dark", height=800, 
-        margin=dict(l=10, r=10, t=10, b=10),
+        template="plotly_dark", height=850, margin=dict(l=5, r=5, t=5, b=5),
         xaxis=dict(visible=False, fixedrange=True),
         yaxis=dict(visible=False, fixedrange=True, autorange="reversed"),
         uirevision="constant", dragmode='select', clickmode='event+select'
@@ -153,17 +150,16 @@ def create_map():
     return fig
 
 with right:
-    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=800)
+    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=850)
     if ev and not st.session_state.playing:
         new_ids = {bays_df.iloc[p['pointNumber']]['bay'] for p in ev if 'pointNumber' in p}
         st.session_state.selected_bays ^= new_ids; st.rerun()
     
-    # --- CLEAN HORIZONTAL LEGEND ---
+    # LEGEND
     st.write("###")
     cols = st.columns(len(STATUSES) + 1)
-    all_items = list(STATUSES.items()) + [("Selected", SELECTION_COLOR)]
-    for i, (label, color) in enumerate(all_items):
-        cols[i].markdown(f"<div style='border-bottom: 5px solid {color}; text-align: center;'><small><b>{label.upper()}</b></small></div>", unsafe_allow_html=True)
+    for i, (l, c) in enumerate(list(STATUSES.items()) + [("Selected", SELECTION_COLOR)]):
+        cols[i].markdown(f"<div style='border-bottom: 5px solid {c}; text-align: center;'><small><b>{l.upper()}</b></small></div>", unsafe_allow_html=True)
 
 # ------------------------------------------------
 # 6. PROPOSAL MANAGEMENT
@@ -173,33 +169,19 @@ st.subheader("📋 Requests In Review")
 all_proposals = []
 for b_id, info in data.items():
     for p in info.get("proposals", []):
-        all_proposals.append({
-            "Bay": b_id, "Type": p["type"], "Start": p["start"], "End": p["end"], "Project": p["reason"]
-        })
+        all_proposals.append({"Bay": b_id, "Type": p["type"], "Start": p["start"], "Project": p["reason"]})
 
 if all_proposals:
     prop_df = pd.DataFrame(all_proposals)
     for project, group in prop_df.groupby("Project"):
         with st.expander(f"Project: {project} ({len(group)} Bays)"):
-            st.table(group[["Bay", "Type", "Start", "End"]])
-            c1, c2 = st.columns(2)
-            if c1.button(f"✅ Approve {project}", key=f"app_{project}"):
-                for idx, row in group.iterrows():
-                    b_id = row["Bay"]
-                    if "history" not in data[b_id]: data[b_id]["history"] = []
-                    # ADD TO HISTORY
-                    data[b_id]["history"].append({
-                        "type": row["Type"], 
-                        "start": str(row["Start"]), 
-                        "end": str(row["End"]), 
-                        "reason": project
-                    })
-                    # REMOVE FROM PROPOSALS
-                    data[b_id]["proposals"] = [p for p in data[b_id].get("proposals", []) if p["reason"] != project]
-                save_data(data); st.rerun()
-            if c2.button(f"❌ Reject {project}", key=f"rej_{project}"):
+            st.table(group[["Bay", "Type", "Start"]])
+            if st.button(f"✅ Approve {project}", key=f"app_{project}"):
                 for b_id in group["Bay"]:
-                    data[b_id]["proposals"] = [p for p in data[b_id].get("proposals", []) if p["reason"] != project]
+                    # Create entry: Type and Start date (No End date required now)
+                    new_entry = {"type": group.iloc[0]["Type"], "start": str(group.iloc[0]["Start"]), "reason": project}
+                    data[b_id].setdefault("history", []).append(new_entry)
+                    data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
                 save_data(data); st.rerun()
 else:
     st.info("No pending proposals.")
