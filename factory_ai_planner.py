@@ -152,7 +152,7 @@ def create_map():
         text=texts, hoverinfo="text"
     ))
     # Height increased to 900 for larger on-screen presence
-    fig.update_layout(template="plotly_dark", height=900, margin=dict(l=0,r=0,t=0,b=0),
+    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=0,r=0,t=0,b=0),
                       xaxis=dict(visible=False, scaleanchor="y"), yaxis=dict(visible=False, autorange="reversed"),
                       uirevision="constant", dragmode='select', clickmode='event+select')
     return fig
