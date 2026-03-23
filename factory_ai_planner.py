@@ -54,7 +54,7 @@ st.title("⚡ Factory Planner")
 
 data = load_data()
 
-t_col1, t_col2 = st.columns([1, 8])
+t_col1, t_col2 = st.columns([1, 10])
 with t_col1:
     st.write("###")
     if st.button("⏹ Pause" if st.session_state.playing else "▶ Play"):
@@ -69,17 +69,18 @@ with t_col2:
     )
 
 st.divider()
-left, right = st.columns([1, 4])
+# Adjusted ratio from [1,4] to [1,6] to make the grid significantly wider
+left, right = st.columns([1, 6])
 
 # ------------------------------------------------
-# 4. SIDEBAR: CONTROLS & LEGEND
+# 4. SIDEBAR: CONTROLS
 # ------------------------------------------------
 with left:
     st.subheader("📝 New Proposal")
     p_type = st.selectbox("Proposed Category", list(OCCUPIED_TYPES.keys()) + ["Free"])
     p_start = st.date_input("Start Date", value=st.session_state.view_date)
     p_end = st.date_input("End Date", value=p_start + timedelta(days=14))
-    p_reason = st.text_input("Project Name/ID", placeholder="e.g., Model Y Line Expansion")
+    p_reason = st.text_input("Project Name/ID", placeholder="e.g., Robot Install")
     
     if st.button("Submit Proposal", type="primary", use_container_width=True):
         if st.session_state.selected_bays:
@@ -102,29 +103,12 @@ with left:
     if st.button("Clear Selection", use_container_width=True):
         st.session_state.selected_bays = set()
         st.rerun()
-
-    # --- THE LEGEND ---
-    st.divider()
-    with st.expander("🎨 Map Legend", expanded=True):
-        st.markdown("### Categories")
-        # Loop through our types to create the color labels
-        for label, color in OCCUPIED_TYPES.items():
-            st.markdown(f"<span style='color:{color}; font-size:20px;'>■</span> {label}", unsafe_allow_html=True)
-        
-        st.markdown(f"<span style='color:{STATUSES['Free']}; font-size:20px;'>■</span> Free Space", unsafe_allow_html=True)
-        st.markdown(f"<span style='color:{STATUSES['Blocked']}; font-size:20px;'>■</span> Columns/Walls", unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("### Status Indicators")
-        st.markdown(f"<span style='color:{SELECTION_COLOR}; font-size:20px;'>■</span> **Active Selection**", unsafe_allow_html=True)
-        st.markdown(f"<span style='border:2px solid {PENDING_OUTLINE}; padding:1px 5px; color:white;'>Red Border</span> **Pending Proposal**", unsafe_allow_html=True)
-
-    # Display selection count for clarity
+    
     if st.session_state.selected_bays:
-        st.success(f"Selected: {len(st.session_state.selected_bays)} bays")
+        st.info(f"Selected: {len(st.session_state.selected_bays)} bays")
 
 # ------------------------------------------------
-# 5. RENDER ENGINE (Timeline Logic)
+# 5. RENDER ENGINE & HORIZONTAL LEGEND
 # ------------------------------------------------
 def create_map():
     v_date = st.session_state.view_date
@@ -133,14 +117,11 @@ def create_map():
     for b_id in bays_df['bay']:
         is_selected = b_id in st.session_state.selected_bays
         info = data.get(b_id)
-        
-        # Defaults
         base_col, label, b_col, b_wid, reason_str = STATUSES["Free"], "Free", "#222", 1, ""
         
         if b_id in STRUCTURAL_IDS:
             base_col, label = STATUSES["Blocked"], "Column"
         elif info:
-            # 1. Search History for a valid match for the current "Clock" date
             active_event = None
             for event in info.get("history", []):
                 h_s, h_e = date.fromisoformat(event["start"]), date.fromisoformat(event["end"])
@@ -153,7 +134,6 @@ def create_map():
                 base_col = STATUSES.get(label, "#d3d3d3")
                 reason_str = f"<br>Current: {active_event.get('reason', 'N/A')}"
 
-            # 2. Check for Proposals (Red Border)
             for p in info.get("proposals", []):
                 ps_d, pe_d = date.fromisoformat(p["start"]), date.fromisoformat(p["end"])
                 if ps_d <= v_date <= pe_d:
@@ -168,20 +148,31 @@ def create_map():
 
     fig = go.Figure(go.Scattergl(
         x=bays_df['x'], y=bays_df['y'], mode="markers",
-        marker=dict(symbol="square", size=17, color=colors, line=dict(width=l_widths, color=l_colors)),
+        marker=dict(symbol="square", size=18, color=colors, line=dict(width=l_widths, color=l_colors)),
         text=texts, hoverinfo="text"
     ))
-    fig.update_layout(template="plotly_dark", height=700, margin=dict(l=0,r=0,t=0,b=0),
+    # Height increased to 900 for larger on-screen presence
+    fig.update_layout(template="plotly_dark", height=900, margin=dict(l=0,r=0,t=0,b=0),
                       xaxis=dict(visible=False, scaleanchor="y"), yaxis=dict(visible=False, autorange="reversed"),
                       uirevision="constant", dragmode='select', clickmode='event+select')
     return fig
 
 with right:
-    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=700)
+    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=900)
     if ev and not st.session_state.playing:
         new_ids = {bays_df.iloc[p['pointNumber']]['bay'] for p in ev if 'pointNumber' in p}
         st.session_state.selected_bays ^= new_ids
         st.rerun()
+    
+    # --- HORIZONTAL LEGEND UNDER CHART ---
+    st.write("###")
+    l_cols = st.columns(len(STATUSES) + 1)
+    for i, (label, color) in enumerate(STATUSES.items()):
+        l_cols[i].markdown(f"<div style='text-align:center'><span style='color:{color}; font-size:24px;'>■</span><br><small>{label}</small></div>", unsafe_allow_html=True)
+    
+    # Add Selection and Pending info to the end of the legend
+    l_cols[-1].markdown(f"<div style='text-align:center'><span style='color:{SELECTION_COLOR}; font-size:24px;'>■</span><br><small>Selected</small></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center; border-top: 2px solid {PENDING_OUTLINE}; width: 100px; margin: auto;'><small>Pending Outline</small></div>", unsafe_allow_html=True)
 
 # ------------------------------------------------
 # 6. PROPOSAL MANAGEMENT
@@ -194,7 +185,7 @@ for b_id, info in data.items():
     for p in info.get("proposals", []):
         all_proposals.append({
             "Bay": b_id, "Type": p["type"], "Start": p["start"], "End": p["end"], 
-            "Project": p["reason"], "internal_id": p["id"]
+            "Project": p["reason"]
         })
 
 if all_proposals:
@@ -203,22 +194,13 @@ if all_proposals:
         with st.expander(f"Project: {project} ({len(group)} Bays)"):
             st.table(group[["Bay", "Type", "Start", "End"]])
             c1, c2 = st.columns(2)
-            
             if c1.button(f"✅ Approve {project}", key=f"app_{project}"):
                 for idx, row in group.iterrows():
                     b_id = row["Bay"]
-                    # Add to history list instead of overwriting a single value
                     if "history" not in data[b_id]: data[b_id]["history"] = []
-                    data[b_id]["history"].append({
-                        "type": row["Type"],
-                        "start": row["Start"],
-                        "end": row["End"],
-                        "reason": project
-                    })
-                    # Remove from proposal list
+                    data[b_id]["history"].append({"type": row["Type"], "start": row["Start"], "end": row["End"], "reason": project})
                     data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
                 save_data(data); st.rerun()
-                
             if c2.button(f"❌ Reject {project}", key=f"rej_{project}"):
                 for b_id in group["Bay"]:
                     data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
