@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import time
 
 # ------------------------------------------------
-# 1. CONFIG & REFINED COLORS
+# 1. CONFIG
 # ------------------------------------------------
 GRID_X, GRID_Y, CELL = 60, 30, 20
 DATA_FILE = "factory_grid.json"
@@ -69,9 +69,9 @@ with t_col2:
     )
 
 # ------------------------------------------------
-# 4. MAIN LAYOUT: SIDEBAR & GRID
+# 4. MAIN LAYOUT
 # ------------------------------------------------
-left, right = st.columns([1, 5.5])
+left, right = st.columns([1, 6]) # Adjusted to give even more room to the grid
 
 with left:
     st.subheader("📝 New Proposal")
@@ -94,9 +94,6 @@ with left:
 
     if st.button("Clear Selection", use_container_width=True):
         st.session_state.selected_bays = set(); st.rerun()
-    
-    if st.session_state.selected_bays:
-        st.info(f"Selected: {len(st.session_state.selected_bays)} bays")
 
 # ------------------------------------------------
 # 5. RENDER ENGINE (Layout Optimized)
@@ -113,23 +110,27 @@ def create_map():
         if b_id in STRUCTURAL_IDS:
             base_col, label = STATUSES["Blocked"], "Column"
         elif info:
+            # Check APPROVED History first
             active_event = None
             for event in info.get("history", []):
-                h_s, h_e = date.fromisoformat(event["start"]), date.fromisoformat(event["end"])
+                h_s = date.fromisoformat(event["start"])
+                h_e = date.fromisoformat(event["end"])
                 if h_s <= v_date <= h_e:
-                    active_event = event; break
+                    active_event = event
+                    break
             
             if active_event:
                 label = active_event["type"]
                 base_col = STATUSES.get(label, "#d3d3d3")
-                reason_str = f"<br>Current: {active_event.get('reason', 'N/A')}"
+                reason_str = f"<br>Status: {label}<br>Project: {active_event.get('reason', 'N/A')}"
 
+            # Check PROPOSALS second (Red Overlays)
             for p in info.get("proposals", []):
                 ps_d, pe_d = date.fromisoformat(p["start"]), date.fromisoformat(p["end"])
                 if ps_d <= v_date <= pe_d:
                     b_col, b_wid = PENDING_OUTLINE, 3
                     label = f"{label} → {p['type']} (PENDING)"
-                    reason_str += f"<br>Projected: {p['reason']}"
+                    reason_str += f"<br><b>PROPOSED:</b> {p['reason']}"
 
         colors.append(SELECTION_COLOR if is_selected else base_col)
         l_widths.append(2 if is_selected else b_wid)
@@ -138,38 +139,31 @@ def create_map():
 
     fig = go.Figure(go.Scattergl(
         x=bays_df['x'], y=bays_df['y'], mode="markers",
-        marker=dict(symbol="square", size=18, color=colors, line=dict(width=l_widths, color=l_colors)),
+        marker=dict(symbol="square", size=20, color=colors, line=dict(width=l_widths, color=l_colors)),
         text=texts, hoverinfo="text"
     ))
     
     fig.update_layout(
-        template="plotly_dark", height=750, 
-        margin=dict(l=0, r=0, t=0, b=0), # Removed all margins
-        xaxis=dict(visible=False, fixedrange=True), # Lock zoom for better UX
+        template="plotly_dark", height=800, 
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(visible=False, fixedrange=True),
         yaxis=dict(visible=False, fixedrange=True, autorange="reversed"),
         uirevision="constant", dragmode='select', clickmode='event+select'
     )
     return fig
 
 with right:
-    # Render the map
-    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=750)
+    ev = plotly_events(create_map(), click_event=True, select_event=True, key="factory_map", override_height=800)
     if ev and not st.session_state.playing:
         new_ids = {bays_df.iloc[p['pointNumber']]['bay'] for p in ev if 'pointNumber' in p}
         st.session_state.selected_bays ^= new_ids; st.rerun()
     
-    # --- COMPACT HORIZONTAL LEGEND ---
+    # --- CLEAN HORIZONTAL LEGEND ---
     st.write("###")
     cols = st.columns(len(STATUSES) + 1)
     all_items = list(STATUSES.items()) + [("Selected", SELECTION_COLOR)]
-    
     for i, (label, color) in enumerate(all_items):
-        cols[i].markdown(
-            f"<div style='border-bottom: 4px solid {color}; text-align: center; padding-bottom: 5px;'>"
-            f"<small style='font-weight: bold; color: white;'>{label.upper()}</small></div>", 
-            unsafe_allow_html=True
-        )
-    st.markdown(f"<div style='text-align: center; color: {PENDING_OUTLINE}; font-size: 12px; margin-top: 10px;'>◆ PENDING PROPOSAL (RED BORDER)</div>", unsafe_allow_html=True)
+        cols[i].markdown(f"<div style='border-bottom: 5px solid {color}; text-align: center;'><small><b>{label.upper()}</b></small></div>", unsafe_allow_html=True)
 
 # ------------------------------------------------
 # 6. PROPOSAL MANAGEMENT
@@ -193,12 +187,19 @@ if all_proposals:
                 for idx, row in group.iterrows():
                     b_id = row["Bay"]
                     if "history" not in data[b_id]: data[b_id]["history"] = []
-                    data[b_id]["history"].append({"type": row["Type"], "start": row["Start"], "end": row["End"], "reason": project})
-                    data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
+                    # ADD TO HISTORY
+                    data[b_id]["history"].append({
+                        "type": row["Type"], 
+                        "start": str(row["Start"]), 
+                        "end": str(row["End"]), 
+                        "reason": project
+                    })
+                    # REMOVE FROM PROPOSALS
+                    data[b_id]["proposals"] = [p for p in data[b_id].get("proposals", []) if p["reason"] != project]
                 save_data(data); st.rerun()
             if c2.button(f"❌ Reject {project}", key=f"rej_{project}"):
                 for b_id in group["Bay"]:
-                    data[b_id]["proposals"] = [p for p in data[b_id]["proposals"] if p["reason"] != project]
+                    data[b_id]["proposals"] = [p for p in data[b_id].get("proposals", []) if p["reason"] != project]
                 save_data(data); st.rerun()
 else:
     st.info("No pending proposals.")
@@ -207,6 +208,6 @@ else:
 # 7. ANIMATION
 # ------------------------------------------------
 if st.session_state.playing:
-    time.sleep(0.08); st.session_state.view_date += timedelta(days=1)
+    time.sleep(0.05); st.session_state.view_date += timedelta(days=1)
     if st.session_state.view_date >= date.today() + timedelta(days=365): st.session_state.view_date = date.today()
     st.rerun()
