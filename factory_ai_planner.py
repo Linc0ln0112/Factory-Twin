@@ -50,7 +50,7 @@ if "playing" not in st.session_state: st.session_state.playing = False
 # 3. UI HEADER
 # ------------------------------------------------
 st.set_page_config(layout="wide", page_title="Tesla Digital Twin")
-st.title("⚡ Factory Planner: Date-Valid History")
+st.title("⚡ Factory Planner")
 
 data = load_data()
 
