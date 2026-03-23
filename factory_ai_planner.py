@@ -72,14 +72,14 @@ st.divider()
 left, right = st.columns([1, 4])
 
 # ------------------------------------------------
-# 4. SIDEBAR: CREATE PROPOSALS
+# 4. SIDEBAR: CONTROLS & LEGEND
 # ------------------------------------------------
 with left:
-    st.subheader("📝 Space Request")
+    st.subheader("📝 New Proposal")
     p_type = st.selectbox("Proposed Category", list(OCCUPIED_TYPES.keys()) + ["Free"])
     p_start = st.date_input("Start Date", value=st.session_state.view_date)
     p_end = st.date_input("End Date", value=p_start + timedelta(days=14))
-    p_reason = st.text_input("Project Name/ID")
+    p_reason = st.text_input("Project Name/ID", placeholder="e.g., Model Y Line Expansion")
     
     if st.button("Submit Proposal", type="primary", use_container_width=True):
         if st.session_state.selected_bays:
@@ -102,6 +102,26 @@ with left:
     if st.button("Clear Selection", use_container_width=True):
         st.session_state.selected_bays = set()
         st.rerun()
+
+    # --- THE LEGEND ---
+    st.divider()
+    with st.expander("🎨 Map Legend", expanded=True):
+        st.markdown("### Categories")
+        # Loop through our types to create the color labels
+        for label, color in OCCUPIED_TYPES.items():
+            st.markdown(f"<span style='color:{color}; font-size:20px;'>■</span> {label}", unsafe_allow_html=True)
+        
+        st.markdown(f"<span style='color:{STATUSES['Free']}; font-size:20px;'>■</span> Free Space", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:{STATUSES['Blocked']}; font-size:20px;'>■</span> Columns/Walls", unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.markdown("### Status Indicators")
+        st.markdown(f"<span style='color:{SELECTION_COLOR}; font-size:20px;'>■</span> **Active Selection**", unsafe_allow_html=True)
+        st.markdown(f"<span style='border:2px solid {PENDING_OUTLINE}; padding:1px 5px; color:white;'>Red Border</span> **Pending Proposal**", unsafe_allow_html=True)
+
+    # Display selection count for clarity
+    if st.session_state.selected_bays:
+        st.success(f"Selected: {len(st.session_state.selected_bays)} bays")
 
 # ------------------------------------------------
 # 5. RENDER ENGINE (Timeline Logic)
