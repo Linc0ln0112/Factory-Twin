@@ -63,7 +63,7 @@ with t_col1:
 
 with t_col2:
     st.session_state.view_date = st.slider(
-        "🗓️ Simulation Clock", 
+        "🗓️ Factory Evolution", 
         min_value=date.today(), max_value=date.today() + timedelta(days=365), 
         value=st.session_state.view_date, format="MMM DD, YYYY"
     )
@@ -75,7 +75,7 @@ left, right = st.columns([1, 4])
 # 4. SIDEBAR: CREATE PROPOSALS
 # ------------------------------------------------
 with left:
-    st.subheader("📝 New Proposal")
+    st.subheader("📝 Space Request")
     p_type = st.selectbox("Proposed Category", list(OCCUPIED_TYPES.keys()) + ["Free"])
     p_start = st.date_input("Start Date", value=st.session_state.view_date)
     p_end = st.date_input("End Date", value=p_start + timedelta(days=14))
@@ -167,7 +167,7 @@ with right:
 # 6. PROPOSAL MANAGEMENT
 # ------------------------------------------------
 st.divider()
-st.subheader("📋 Pending Proposal Queue")
+st.subheader("📋 Requests In Review")
 
 all_proposals = []
 for b_id, info in data.items():
